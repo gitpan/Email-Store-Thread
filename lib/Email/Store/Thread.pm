@@ -1,5 +1,7 @@
 package Email::Store::Thread;
-our $VERSION = "1.1";
+use strict;
+use warnings;
+our $VERSION = "1.2";
 
 # Watch the pea. It's under the first shell
 use base qw(Email::Store::DBI); # For the DATA stuff
@@ -13,7 +15,7 @@ sub on_store {
     # If I'm in the root set, then everyone under me has to know the new
     # root.
     if (grep { $container == $_ } $threader->rootset) {
-        $container->recurse_down(sub { shift->root($container) }); 
+        $container->recurse_down(sub { shift->root($container) });
     } else {
        # Otherwise, work upwards until I find a root.
        $container->find_root_upwards;
@@ -32,7 +34,7 @@ use Email::Store::Mail;
 # Is it under this one?
 use base qw(Mail::Thread::Container Email::Store::DBI);
 __PACKAGE__->table("container");
-__PACKAGE__->columns(All => qw[id message parent child next root]);
+__PACKAGE__->columns(All => qw[id messageid message parent child next root]);
 __PACKAGE__->has_a(message => "Email::Store::Mail");
 __PACKAGE__->has_a(parent  => "Email::Store::Thread::Container");
 __PACKAGE__->has_a(child   => "Email::Store::Thread::Container");
@@ -53,21 +55,24 @@ sub find_root_upwards {
 my %container_cache = ();
 sub new {
     my ($class, $id) = @_;
-    $container_cache{$id} 
-        ||= $class->find_or_create({ message => $id });
+    my $container = $container_cache{$id}
+        ||= $class->find_or_create({ messageid => $id });
+    return $container;
 }
 
 sub flush {
     (delete $container_cache{$_})->update for keys %container_cache;
 }
 
-# Thread::Container wants chained accessors
+# Thread::Container wants regular accessors
 {
     no strict 'refs';
     no warnings 'redefine';
     for my $method (qw/parent child next/) {
         *$method = sub {
             my $self     = shift;
+            # ensure we're in the container cache too
+            $container_cache{ $self->messageid } = $self;
             my $methname = "_${method}_accessor";
             $self->$methname(@_) if @_;
             $self->$methname();
@@ -75,11 +80,11 @@ sub flush {
     }
 }
 
-sub subject { shift->message->simple->header("Subject") }
+sub subject { $_[0]->message->message ? shift->message->simple->header("Subject") : "" }
 
 package Email::Store::Mail;
 sub container {
-    Email::Store::Thread::Container->new(shift->message_id) 
+    Email::Store::Thread::Container->new(shift->message_id)
 }
 
 
@@ -125,12 +130,34 @@ distribution as it tends to slow down indexing somewhat.
 
 L<Email::Store>, L<Mail::Thread>
 
+=head1 AUTHOR
+
+=head1 AUTHOR
+
+The original author is Simon Cozens, E<lt>simon@cpan.orgE<gt>
+Currently maintained by Simon Wistow E<lt>simon@thegestalt.orgE<gt>
+
+=head1 SUPPORT
+
+This module is part of the Perl Email Project - http://pep.kwiki.org/
+
+There is a mailing list at pep@perl.org (subscribe at pep-subscribe@perl.org)
+and an archive available at http://nntp.perl.org/group/pep.php
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2004 by Simon Cozens
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
 =cut
 
 __DATA__
 CREATE TABLE container (
     id         integer NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    message    varchar(255) NOT NULL,
+    messageid  varchar(255) NOT NULL,
+    message    varchar(255),
     parent     integer,
     child      integer,
     next       integer,

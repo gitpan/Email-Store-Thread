@@ -1,5 +1,9 @@
 Revision history for Perl extension Email::Store::Thread.
 
+1.2   Mon Feb  7 12:10:13 GMT 2005
+    - make the containers a little saner by allowing the 
+      containers to not hold message (thanks to Richard Clamp)
+
 1.1   Sun Jul  4 13:49:05 BST 2004
     - Optimizations
     - ->root method
