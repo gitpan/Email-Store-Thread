@@ -1,12 +1,24 @@
 package Email::Store::Thread;
-our $VERSION = "1.0";
+our $VERSION = "1.1";
 
 # Watch the pea. It's under the first shell
 use base qw(Email::Store::DBI); # For the DATA stuff
 sub on_store_order { 10 }
 sub on_store {
     my ($self, $mail) = @_;
-    Email::Store::Thread::Threader->new($mail)->thread;
+    my $threader = Email::Store::Thread::Threader->new($mail);
+    $threader->thread;
+    my $container = $mail->container;
+
+    # If I'm in the root set, then everyone under me has to know the new
+    # root.
+    if (grep { $container == $_ } $threader->rootset) {
+        $container->recurse_down(sub { shift->root($container) }); 
+    } else {
+       # Otherwise, work upwards until I find a root.
+       $container->find_root_upwards;
+    }
+    Email::Store::Thread::Container->flush;
 }
 
 package Email::Store::Thread::Threader;
@@ -20,16 +32,33 @@ use Email::Store::Mail;
 # Is it under this one?
 use base qw(Mail::Thread::Container Email::Store::DBI);
 __PACKAGE__->table("container");
-__PACKAGE__->columns(All => qw[id message parent child next]);
+__PACKAGE__->columns(All => qw[id message parent child next root]);
 __PACKAGE__->has_a(message => "Email::Store::Mail");
 __PACKAGE__->has_a(parent  => "Email::Store::Thread::Container");
 __PACKAGE__->has_a(child   => "Email::Store::Thread::Container");
 __PACKAGE__->has_a(next    => "Email::Store::Thread::Container");
-__PACKAGE__->autoupdate(1); # These need to act like immediate objects
+__PACKAGE__->has_a(root    => "Email::Store::Thread::Container");
 
+sub find_root_upwards {
+    my $self = shift;
+    if (my $par = $self->parent) {
+        $par->find_root_upwards unless $par->root;
+        $self->root($par->root);
+    } else {
+        $self->root($self);
+    }
+}
+
+
+my %container_cache = ();
 sub new {
     my ($class, $id) = @_;
-    $class->find_or_create({ message => $id });
+    $container_cache{$id} 
+        ||= $class->find_or_create({ message => $id });
+}
+
+sub flush {
+    (delete $container_cache{$_})->update for keys %container_cache;
 }
 
 # Thread::Container wants chained accessors
@@ -75,6 +104,7 @@ And now:
     my $container = $mail->container;
     if ($container->parent) {
         print "Parent of this message is ".$container->parent->message;
+        print "Root of this method is ".$container->root->message;
     }
 
 =head2 DESCRIPTION
@@ -85,6 +115,8 @@ conversation. It plugs into the indexing process and works out where in
 the tree the mail belongs; you can then ask a mail for its C<container>,
 a container for its C<message>, and for its C<parent>, C<child> and
 C<sibling> containers, which are used to navigate the thread tree.
+There's also a C<root> container which represents the top message
+in the tree.
 
 This is distributed separately from the main C<Email::Store>
 distribution as it tends to slow down indexing somewhat.
@@ -101,5 +133,6 @@ CREATE TABLE container (
     message    varchar(255) NOT NULL,
     parent     integer,
     child      integer,
-    next       integer
+    next       integer,
+    root       integer
 );

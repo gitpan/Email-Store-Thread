@@ -1,4 +1,4 @@
-use Test::More tests => 4;
+use Test::More tests => 5;
 use File::Slurp;
 BEGIN { unlink("t/test.db"); }
 use Email::Store "dbi:SQLite:dbname=t/test.db";
@@ -23,5 +23,8 @@ my $parent = Email::Store::Mail->retrieve('20040601115553.759d77ec@bugs');
 my $child = $parent->container->child->message;
 is ($child->container->message, $child, "Roundtripable");
 is ($child->message_id, '20040601091735.GA10279@mag-sol.com', "First child");
-is ($child->container->child->child->message->message_id,
+my $grandkid = $child->container->child->child;
+is ($grandkid->message->message_id,
     '40BCAA44.3030100@thefeed.no', "Grandchild");
+is($grandkid->root->message->message_id,'20040601115553.759d77ec@bugs',
+    "check root is set");
